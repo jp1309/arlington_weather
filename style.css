@@ -197,3 +197,10 @@ select:focus, input[type="date"]:focus{
     min-height: 460px;
   }
 }
+
+
+/* v2 tweaks */
+.control-years { max-width: 280px; }
+#years { width: 100%; }
+.pctl-row { display:flex; flex-wrap:wrap; gap: 16px; margin-top: 8px; }
+.pctl-row .checkbox { margin-top: 0; }
