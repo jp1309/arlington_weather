@@ -2,11 +2,10 @@ name: Update NOAA data and rebuild dashboard datasets
 
 on:
   schedule:
-    # GitHub Actions uses UTC. 6:00am America/New_York is:
-    # - 11:00 UTC during Standard Time (roughly Nov–Mar)
-    # - 10:00 UTC during Daylight Time (roughly Mar–Nov)
-    #
-    # Using BOTH keeps it near 6am year-round. One of the two runs will be ~5am or ~7am depending on DST.
+    # GitHub Actions uses UTC.
+    # 6:00am America/New_York ≈
+    # - 10:00 UTC (daylight saving time)
+    # - 11:00 UTC (standard time)
     - cron: "0 10 * * *"
     - cron: "0 11 * * *"
   workflow_dispatch:
@@ -17,8 +16,9 @@ permissions:
 jobs:
   build:
     runs-on: ubuntu-latest
+
     steps:
-      - name: Checkout
+      - name: Checkout repository
         uses: actions/checkout@v4
 
       - name: Set up Python
@@ -39,7 +39,7 @@ jobs:
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add dashboard_site/data/*.csv dashboard_site/data/*.xlsx || true
+          git add data/*.csv data/*.xlsx || true
           if git diff --cached --quiet; then
             echo "No changes to commit."
           else
