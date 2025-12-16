@@ -2,30 +2,32 @@
 """
 Daily updater for Arlington VA proxy station (USW00013743).
 
+Change in this version:
+- START date moved to 1995-01-01 (≈30 years of daily data).
+
 What it does:
 1) Download NOAA GHCN-Daily .dly for the station.
 2) Parse daily elements: TMIN, TMAX, TAVG, PRCP, SNOW, SNWD.
-3) Build a daily dataset from 2015-01-01 to the LAST available date in the .dly.
+3) Build a daily dataset from START to the LAST available date in the .dly.
 4) Impute missing TMIN/TMAX for intermediate days as average of previous and next day.
    If missing on the last day, do nothing (leave missing).
 5) Compute Tavg:
     - Use TAVG if present.
     - Else compute (Tmin + Tmax)/2 when possible (including after imputation).
-6) Write CSVs used by the static dashboard (dashboard_site/data).
-   Also writes an Excel copy (optional) to dashboard_site/data for download.
+6) Write CSVs used by the static dashboard.
+   Also writes an Excel snapshot (optional).
 
 Output files (tracked in git):
-  - dashboard_site/data/arlington_daily.csv
-  - dashboard_site/data/climatology_doy365_mean.csv
-  - dashboard_site/data/arlington_daily_latest.xlsx
+  - data/arlington_daily.csv
+  - data/climatology_doy365_mean.csv
+  - data/arlington_daily_latest.xlsx
 
-Run:
+Run locally:
   python update_noaa_and_build_site.py
 """
 
 from __future__ import annotations
 
-from dataclasses import dataclass
 from datetime import date, timedelta
 from pathlib import Path
 from typing import Dict, Tuple, Optional, Set
@@ -38,14 +40,19 @@ STATION_ID = "USW00013743"
 STATION_NAME = "WASHINGTON REAGAN NATIONAL AIRPORT, VA US (proxy for Arlington, VA)"
 DLY_URL = f"https://www.ncei.noaa.gov/pub/data/ghcn/daily/all/{STATION_ID}.dly"
 
-START = date(2015, 1, 1)
+# >>> MAIN CHANGE <<<
+START = date(1995, 1, 1)
+
 MISSING = -9999
 
 ELEMENTS: Set[str] = {"TMIN", "TMAX", "TAVG", "PRCP", "SNOW", "SNWD"}
 DIV10 = {"TMIN", "TMAX", "TAVG", "PRCP"}  # tenths of unit
 DIV1 = {"SNOW", "SNWD"}                   # mm
 
-OUT_DIR = Path("dashboard_site") / "data"
+# IMPORTANT:
+# If your published site is at repo root, keep this as "data".
+# If you publish from /dashboard_site, change to Path("dashboard_site")/"data".
+OUT_DIR = Path("data")
 OUT_DIR.mkdir(parents=True, exist_ok=True)
 
 
@@ -104,7 +111,7 @@ def build_series(text: str) -> Tuple[Dict[date, Dict[str, float]], date]:
                 last_date = d
 
     if last_date is None:
-        raise RuntimeError("No valid observations found from 2015-01-01 in the station .dly.")
+        raise RuntimeError(f"No valid observations found from {START.isoformat()} in the station .dly.")
     return series, last_date
 
 
@@ -150,11 +157,11 @@ def build_dataframe(series: Dict[date, Dict[str, float]], imputados: Dict[date, 
 
         imputed_flag = 1 if d in imputados else 0
 
-        # prefer official TAVG; else compute if possible
         notes = []
         if d in imputados:
             notes.append("Imputado: " + ",".join(sorted(imputados[d])) + " (avg prev/next)")
 
+        # prefer official TAVG; else compute if possible
         if tavg is None and (tmin is not None and tmax is not None):
             tavg = (tmin + tmax) / 2.0
             notes.append("TAVG computed as (Tmin+Tmax)/2")
@@ -189,7 +196,6 @@ def build_dataframe(series: Dict[date, Dict[str, float]], imputados: Dict[date, 
 
 
 def write_outputs(df: pd.DataFrame) -> None:
-    # Main CSV for dashboard
     out_csv = OUT_DIR / "arlington_daily.csv"
     df_out = df[
         ["Date","Year","DOY_366","DOY_365","Tmin_C","Tmax_C","Tavg_C","PRCP_mm","SNOW_mm","SNWD_mm","ImputedTempFlag"]
@@ -197,15 +203,12 @@ def write_outputs(df: pd.DataFrame) -> None:
     df_out["Date"] = df_out["Date"].dt.strftime("%Y-%m-%d")
     df_out.to_csv(out_csv, index=False)
 
-    # Climatology by DOY_365 (mean). Exclude Feb 29
     clim = df.dropna(subset=["DOY_365"]).groupby("DOY_365")[["Tmin_C","Tmax_C","Tavg_C","PRCP_mm"]].mean().reset_index()
     clim.to_csv(OUT_DIR / "climatology_doy365_mean.csv", index=False)
 
-    # Optional Excel snapshot for download
     try:
         out_xlsx = OUT_DIR / "arlington_daily_latest.xlsx"
-        df_excel = df_out.copy()
-        df_excel.to_excel(out_xlsx, index=False)
+        df_out.to_excel(out_xlsx, index=False)
     except Exception as e:
         print("WARN: could not write Excel snapshot:", e)
 
@@ -221,7 +224,7 @@ def main():
     imputados = interpolate_temps(series, START, last_date)
     df = build_dataframe(series, imputados, START, last_date)
 
-    # Basic sanity prints
+    print("Start:", START.isoformat())
     print("Last date available:", last_date.isoformat())
     print("Rows:", len(df))
     print("Imputed temp days:", int(df["ImputedTempFlag"].sum()))
