@@ -11,7 +11,7 @@
   <div class="container">
     <header>
       <h1>Arlington, VA. Clima diario (proxy: Reagan National)</h1>
-      <p class="subtitle">Serie diaria desde 2015. Datos NOAA GHCN-Daily. Visualización estática para GitHub Pages.</p>
+      <p class="subtitle">Serie diaria desde 1995. Datos NOAA GHCN-Daily.</p>
     </header>
 
     <section class="controls">
@@ -22,46 +22,24 @@
           <option value="Tmin_C">Temperatura mínima (°C)</option>
           <option value="Tmax_C">Temperatura máxima (°C)</option>
           <option value="PRCP_mm">Precipitación (mm)</option>
-          <option value="SNOW_mm">Nieve (mm)</option>
-          <option value="SNWD_mm">Profundidad de nieve (mm)</option>
         </select>
       </div>
 
       <div class="control">
-        <label for="years">Años (multi-selección)</label>
+        <label for="years">Años (multi‑selección)</label>
         <select id="years" multiple size="8"></select>
-        <div class="hint">Tip: Ctrl+clic (Windows) para elegir varios.</div>
       </div>
 
       <div class="control">
-        <label>Intervalo del año</label>
-        <div class="row">
-          <div class="subcontrol">
-            <span class="subtle">Desde</span>
-            <input type="date" id="startDate" min="2001-01-01" max="2001-12-31" value="2001-01-01" />
-          </div>
-          <div class="subcontrol">
-            <span class="subtle">Hasta</span>
-            <input type="date" id="endDate" min="2001-01-01" max="2001-12-31" value="2001-12-31" />
-          </div>
-        </div>
-
-        <div class="quick">
-          <button type="button" class="btn" id="btnFull">Año completo</button>
-          <button type="button" class="btn" id="btnNovDec">Nov–Dic</button>
-          <button type="button" class="btn" id="btnJJA">Jun–Ago</button>
-        </div>
-
-        <label class="checkbox">
-          <input type="checkbox" id="showClim" checked />
-          Mostrar climatología (promedio 2015–último)
-        </label>
+        <label>Percentiles climatológicos</label>
+        <label class="checkbox"><input type="checkbox" id="p10" checked> p10</label>
+        <label class="checkbox"><input type="checkbox" id="p50" checked> p50</label>
+        <label class="checkbox"><input type="checkbox" id="p90" checked> p90</label>
       </div>
     </section>
 
     <section class="chart">
       <div id="plot" class="plot"></div>
-      <div class="footnote" id="footnote"></div>
     </section>
   </div>
 
