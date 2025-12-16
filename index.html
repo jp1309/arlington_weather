@@ -1,1 +1,83 @@
-<!-- index.html unchanged -->
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Arlington VA. Clima diario (NOAA)</title>
+  <link rel="stylesheet" href="style.css" />
+  <script src="https://cdn.plot.ly/plotly-2.30.0.min.js"></script>
+</head>
+<body>
+  <div class="container">
+    <header>
+      <h1>Arlington, VA. Clima diario (proxy: Reagan National)</h1>
+      <p class="subtitle">Serie diaria desde 1995. Datos NOAA GHCN‑Daily. Visualización estática para GitHub Pages.</p>
+    </header>
+
+    <section class="controls">
+      <div class="control control-variable">
+        <label for="metric">Variable</label>
+        <select id="metric">
+          <option value="Tavg_C">Temperatura media (°C)</option>
+          <option value="Tmin_C">Temperatura mínima (°C)</option>
+          <option value="Tmax_C">Temperatura máxima (°C)</option>
+          <option value="PRCP_mm">Precipitación (mm)</option>
+          <option value="SNOW_mm">Nieve (mm)</option>
+          <option value="SNWD_mm">Profundidad de nieve (mm)</option>
+        </select>
+      </div>
+
+      <div class="control control-years">
+        <label for="years">Años (multi‑selección)</label>
+        <select id="years" multiple size="4"></select>
+        <div class="hint">Tip: Ctrl+clic (Windows) para elegir varios.</div>
+      </div>
+
+      <div class="control control-interval">
+        <label>Intervalo del año (día/mes)</label>
+
+        <div class="row row-interval">
+          <div class="subcontrol">
+            <span class="subtle">Desde</span>
+            <div class="md">
+              <select id="startDay" aria-label="Día inicio"></select>
+              <select id="startMonth" aria-label="Mes inicio"></select>
+            </div>
+          </div>
+
+          <div class="subcontrol">
+            <span class="subtle">Hasta</span>
+            <div class="md">
+              <select id="endDay" aria-label="Día fin"></select>
+              <select id="endMonth" aria-label="Mes fin"></select>
+            </div>
+          </div>
+        </div>
+
+        <div class="quick">
+          <button type="button" class="btn" id="btnFull">Año</button>
+          <button type="button" class="btn" id="btnQ1">Ene–Mar</button>
+          <button type="button" class="btn" id="btnQ2">Abr–Jun</button>
+          <button type="button" class="btn" id="btnQ3">Jul–Sep</button>
+          <button type="button" class="btn" id="btnQ4">Oct–Dic</button>
+        </div>
+
+        <div class="subtle" style="margin-top:10px;">Percentiles climatológicos</div>
+        <div class="pctl-row">
+          <label class="checkbox"><input type="checkbox" id="p10" checked /> p10</label>
+          <label class="checkbox"><input type="checkbox" id="p50" checked /> p50</label>
+          <label class="checkbox"><input type="checkbox" id="p90" checked /> p90</label>
+        </div>
+        <div class="hint" id="pctlNote"></div>
+      </div>
+    </section>
+
+    <section class="chart">
+      <div id="plot" class="plot"></div>
+      <div class="footnote" id="footnote"></div>
+    </section>
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>
