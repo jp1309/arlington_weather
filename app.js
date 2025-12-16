@@ -44,14 +44,16 @@ function unique(arr){
 
 function pad2(n){ return String(n).padStart(2,"0"); }
 
-// Reference year (non-leap) for month/day mapping
 function doyToMD(doy){
   const dt = new Date(Date.UTC(2001, 0, 1));
   dt.setUTCDate(dt.getUTCDate() + (doy - 1));
   return {m: dt.getUTCMonth() + 1, d: dt.getUTCDate()};
 }
 function mdToDoy(month, day){
-  const dt = new Date(Date.UTC(2001, month - 1, day));
+  const daysInMonth = [31,28,31,30,31,30,31,31,30,31,30,31];
+  const maxd = daysInMonth[month-1] || 31;
+  const dd = Math.min(day, maxd);
+  const dt = new Date(Date.UTC(2001, month - 1, dd));
   const start = new Date(Date.UTC(2001, 0, 1));
   const diffDays = Math.floor((dt - start) / (24*3600*1000));
   return diffDays + 1;
@@ -60,10 +62,6 @@ function doyToLabel(doy){
   const {m, d} = doyToMD(doy);
   const names = ["ene","feb","mar","abr","may","jun","jul","ago","sep","oct","nov","dic"];
   return `${pad2(d)}-${names[m-1]}`;
-}
-function dateInputToDoy(value){
-  const parts = value.split("-").map(Number);
-  return mdToDoy(parts[1], parts[2]);
 }
 function clamp(x, lo, hi){ return Math.max(lo, Math.min(hi, x)); }
 
@@ -107,6 +105,23 @@ function setDefaultYears(years){
   }
 }
 
+function getIntervalDoys(){
+  const sd = Number(document.getElementById("startDay").value);
+  const sm = Number(document.getElementById("startMonth").value);
+  const ed = Number(document.getElementById("endDay").value);
+  const em = Number(document.getElementById("endMonth").value);
+
+  let startDoy = mdToDoy(sm, sd);
+  let endDoy = mdToDoy(em, ed);
+
+  if(endDoy < startDoy){
+    const t = startDoy; startDoy = endDoy; endDoy = t;
+  }
+  startDoy = clamp(startDoy, 1, 365);
+  endDoy = clamp(endDoy, 1, 365);
+  return {startDoy, endDoy};
+}
+
 function buildPlot(){
   try{
     if(typeof Plotly === "undefined"){
@@ -116,20 +131,11 @@ function buildPlot(){
 
     const metric = document.getElementById("metric").value;
     const meta = getMetricMeta(metric);
-
-    const startVal = document.getElementById("startDate").value;
-    const endVal = document.getElementById("endDate").value;
-
-    let startDoy = dateInputToDoy(startVal);
-    let endDoy = dateInputToDoy(endVal);
-    if(endDoy < startDoy){ const t = startDoy; startDoy = endDoy; endDoy = t; }
-    startDoy = clamp(startDoy, 1, 365);
-    endDoy = clamp(endDoy, 1, 365);
+    const {startDoy, endDoy} = getIntervalDoys();
 
     const years = getSelectedYears();
     const traces = [];
 
-    // Percentiles (only for supported metrics)
     const note = document.getElementById("pctlNote");
     const p10on = document.getElementById("p10").checked;
     const p50on = document.getElementById("p50").checked;
@@ -167,7 +173,6 @@ function buildPlot(){
       if(p90on) addP("p90", c90, 1);
     }
 
-    // Year series
     for(const yr of years){
       const rows = DATA.filter(r => Number(r["Year"]) === yr).filter(r => {
         const d = toNum(r["DOY_365"]);
@@ -207,11 +212,47 @@ function buildPlot(){
   }
 }
 
+function updateDayOptions(monthId, dayId){
+  const m = Number(document.getElementById(monthId).value);
+  const daySel = document.getElementById(dayId);
+  const prev = Number(daySel.value || 1);
+  const daysInMonth = [31,28,31,30,31,30,31,31,30,31,30,31];
+  const maxd = daysInMonth[m-1] || 31;
+
+  daySel.innerHTML = "";
+  for(let d=1; d<=maxd; d++){
+    const opt = document.createElement("option");
+    opt.value = String(d);
+    opt.textContent = String(d);
+    daySel.appendChild(opt);
+  }
+  daySel.value = String(Math.min(prev, maxd));
+}
+
+function populateMonthSelect(id){
+  const sel = document.getElementById(id);
+  const months = [
+    [1,"Ene"],[2,"Feb"],[3,"Mar"],[4,"Abr"],[5,"May"],[6,"Jun"],
+    [7,"Jul"],[8,"Ago"],[9,"Sep"],[10,"Oct"],[11,"Nov"],[12,"Dic"]
+  ];
+  sel.innerHTML = "";
+  for(const [v,lab] of months){
+    const opt = document.createElement("option");
+    opt.value = String(v);
+    opt.textContent = lab;
+    sel.appendChild(opt);
+  }
+}
+
 function setIntervalMD(m1, d1, m2, d2){
-  const s = `2001-${pad2(m1)}-${pad2(d1)}`;
-  const e = `2001-${pad2(m2)}-${pad2(d2)}`;
-  document.getElementById("startDate").value = s;
-  document.getElementById("endDate").value = e;
+  document.getElementById("startMonth").value = String(m1);
+  updateDayOptions("startMonth", "startDay");
+  document.getElementById("startDay").value = String(d1);
+
+  document.getElementById("endMonth").value = String(m2);
+  updateDayOptions("endMonth", "endDay");
+  document.getElementById("endDay").value = String(d2);
+
   buildPlot();
 }
 
@@ -225,6 +266,15 @@ async function init(){
     DATA = parseCSV(dataTxt);
     PCTL = parseCSV(pctlTxt);
 
+    populateMonthSelect("startMonth");
+    populateMonthSelect("endMonth");
+    document.getElementById("startMonth").value = "1";
+    document.getElementById("endMonth").value = "12";
+    updateDayOptions("startMonth","startDay");
+    updateDayOptions("endMonth","endDay");
+    document.getElementById("startDay").value = "1";
+    document.getElementById("endDay").value = "31";
+
     const years = unique(DATA.map(r => Number(r["Year"]))).filter(x => Number.isFinite(x));
     const yearsSel = document.getElementById("years");
     yearsSel.innerHTML = "";
@@ -236,13 +286,19 @@ async function init(){
     }
     setDefaultYears(years);
 
-    ["metric","years","startDate","endDate","p10","p50","p90"].forEach(id => {
-      document.getElementById(id).addEventListener("change", buildPlot);
+    ["metric","years","p10","p50","p90","startDay","startMonth","endDay","endMonth"].forEach(id => {
+      document.getElementById(id).addEventListener("change", () => {
+        if(id === "startMonth") updateDayOptions("startMonth","startDay");
+        if(id === "endMonth") updateDayOptions("endMonth","endDay");
+        buildPlot();
+      });
     });
 
     document.getElementById("btnFull").addEventListener("click", () => setIntervalMD(1,1,12,31));
-    document.getElementById("btnNovDec").addEventListener("click", () => setIntervalMD(11,1,12,31));
-    document.getElementById("btnJJA").addEventListener("click", () => setIntervalMD(6,1,8,31));
+    document.getElementById("btnQ1").addEventListener("click", () => setIntervalMD(1,1,3,31));
+    document.getElementById("btnQ2").addEventListener("click", () => setIntervalMD(4,1,6,30));
+    document.getElementById("btnQ3").addEventListener("click", () => setIntervalMD(7,1,9,30));
+    document.getElementById("btnQ4").addEventListener("click", () => setIntervalMD(10,1,12,31));
 
     buildPlot();
   } catch(e){

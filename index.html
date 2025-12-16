@@ -15,7 +15,7 @@
     </header>
 
     <section class="controls">
-      <div class="control">
+      <div class="control control-variable">
         <label for="metric">Variable</label>
         <select id="metric">
           <option value="Tavg_C">Temperatura media (°C)</option>
@@ -27,29 +27,39 @@
         </select>
       </div>
 
-      <div class="control">
+      <div class="control control-years">
         <label for="years">Años (multi‑selección)</label>
-        <select id="years" multiple size="8"></select>
+        <select id="years" multiple size="6"></select>
         <div class="hint">Tip: Ctrl+clic (Windows) para elegir varios.</div>
       </div>
 
-      <div class="control">
-        <label>Intervalo del año</label>
-        <div class="row">
+      <div class="control control-interval">
+        <label>Intervalo del año (día/mes)</label>
+
+        <div class="row row-interval">
           <div class="subcontrol">
             <span class="subtle">Desde</span>
-            <input type="date" id="startDate" min="2001-01-01" max="2001-12-31" value="2001-01-01" />
+            <div class="md">
+              <select id="startDay" aria-label="Día inicio"></select>
+              <select id="startMonth" aria-label="Mes inicio"></select>
+            </div>
           </div>
+
           <div class="subcontrol">
             <span class="subtle">Hasta</span>
-            <input type="date" id="endDate" min="2001-01-01" max="2001-12-31" value="2001-12-31" />
+            <div class="md">
+              <select id="endDay" aria-label="Día fin"></select>
+              <select id="endMonth" aria-label="Mes fin"></select>
+            </div>
           </div>
         </div>
 
         <div class="quick">
           <button type="button" class="btn" id="btnFull">Año completo</button>
-          <button type="button" class="btn" id="btnNovDec">Nov–Dic</button>
-          <button type="button" class="btn" id="btnJJA">Jun–Ago</button>
+          <button type="button" class="btn" id="btnQ1">Ene–Mar</button>
+          <button type="button" class="btn" id="btnQ2">Abr–Jun</button>
+          <button type="button" class="btn" id="btnQ3">Jul–Sep</button>
+          <button type="button" class="btn" id="btnQ4">Oct–Dic</button>
         </div>
 
         <div class="subtle" style="margin-top:10px;">Percentiles climatológicos</div>
