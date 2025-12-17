@@ -1,168 +1,219 @@
 #!/usr/bin/env python3
-"""Update NOAA GHCN-Daily data for USW00013743 and build dashboard CSVs including p10/p50/p90 percentiles by DOY_365."""
+# -*- coding: utf-8 -*-
+"""
+Update NOAA GHCN-Daily data (.dly) + rebuild dashboard datasets.
 
-from __future__ import annotations
-from datetime import date, timedelta
+NOAA occasionally returns HTTP 503. This script now:
+  1) Retries with exponential backoff on transient HTTP errors.
+  2) Falls back to a cached local .dly if available.
+  3) If neither works, exits 0 (no-op) so GitHub Pages stays up using prior datasets.
+"""
+
+import os
+import sys
+import time
+import json
+import datetime as dt
 from pathlib import Path
-from typing import Dict, Tuple, Optional, Set
-import numpy as np
+
 import pandas as pd
 import requests
 
-STATION_ID = "USW00013743"
-DLY_URL = f"https://www.ncei.noaa.gov/pub/data/ghcn/daily/all/{STATION_ID}.dly"
-START = date(1995, 1, 1)
-MISSING = -9999
+STATION_ID = os.environ.get("GHCN_STATION_ID", "USW00013743")  # Reagan National (proxy)
+START_DATE = dt.date(1995, 1, 1)
 
-ELEMENTS: Set[str] = {"TMIN","TMAX","TAVG","PRCP","SNOW","SNWD"}
-DIV10 = {"TMIN","TMAX","TAVG","PRCP"}
-DIV1 = {"SNOW","SNWD"}
+TIMEOUT_SECS = 60
+PRIMARY_URL = f"https://www.ncei.noaa.gov/pub/data/ghcn/daily/all/{STATION_ID}.dly"
+FALLBACK_URL = f"https://www1.ncdc.noaa.gov/pub/data/ghcn/daily/all/{STATION_ID}.dly"
 
-OUT_DIR = Path("data")
-OUT_DIR.mkdir(parents=True, exist_ok=True)
+REPO_ROOT = Path(__file__).resolve().parent
+DATA_DIR = REPO_ROOT / "data"
+RAW_DIR = DATA_DIR / "raw"
+RAW_DIR.mkdir(parents=True, exist_ok=True)
 
-def parse_dly_line(line: str) -> Tuple[str,int,int,str,Dict[int,int]]:
-    station = line[0:11]
-    year = int(line[11:15])
-    month = int(line[15:17])
-    element = line[17:21]
-    values: Dict[int,int] = {}
-    pos = 21
-    for day in range(1,32):
-        values[day] = int(line[pos:pos+5])
-        pos += 8
-    return station, year, month, element, values
+RAW_DLY_PATH = RAW_DIR / f"{STATION_ID}.dly"
 
-def fetch_dly_text() -> str:
-    r = requests.get(DLY_URL, timeout=180)
-    r.raise_for_status()
+OUT_DAILY_CSV = DATA_DIR / "daily.csv"
+OUT_CLIM_PCTL = DATA_DIR / "climatology_doy365_percentiles.csv"
+OUT_META = DATA_DIR / "meta.json"
+
+VARS = ["TMIN", "TMAX", "PRCP", "SNOW", "SNWD"]
+
+def fetch_with_retries(url: str, retries: int = 6, backoff_base: float = 1.7):
+    headers = {
+        "User-Agent": "arlington-weather-dashboard/1.0 (GitHub Actions)",
+        "Accept": "*/*",
+        "Connection": "close",
+    }
+    last_err = None
+    for i in range(retries):
+        try:
+            r = requests.get(url, headers=headers, timeout=TIMEOUT_SECS)
+            if r.status_code == 200:
+                return r
+            if r.status_code in (429, 500, 502, 503, 504):
+                wait = (backoff_base ** i) + (0.15 * i)
+                print(f"[WARN] HTTP {r.status_code} from {url}. Retry {i+1}/{retries} in {wait:.1f}s")
+                time.sleep(wait)
+                continue
+            r.raise_for_status()
+            return r
+        except Exception as e:
+            last_err = e
+            wait = (backoff_base ** i) + (0.15 * i)
+            print(f"[WARN] Request error: {e}. Retry {i+1}/{retries} in {wait:.1f}s")
+            time.sleep(wait)
+    print(f"[ERROR] Failed to fetch after {retries} retries: {url}")
+    if last_err:
+        print(f"[ERROR] Last error: {last_err}")
+    return None
+
+def fetch_dly_text():
+    r = fetch_with_retries(PRIMARY_URL)
+    if r is None:
+        print("[INFO] Trying fallback NOAA host...")
+        r = fetch_with_retries(FALLBACK_URL)
+    if r is None:
+        return None
     return r.text
 
-def convert_value(element: str, raw: int) -> Optional[float]:
-    if raw == MISSING:
-        return None
-    if element in DIV10:
-        return raw/10.0
-    if element in DIV1:
-        return float(raw)
-    return float(raw)
-
-def build_series(text: str) -> Tuple[Dict[date,Dict[str,float]], date]:
-    series: Dict[date,Dict[str,float]] = {}
-    last_date: Optional[date] = None
+def parse_dly_to_df(text: str) -> pd.DataFrame:
+    rows = []
     for line in text.splitlines():
-        if not line.strip():
+        st = line[0:11]
+        year = int(line[11:15])
+        month = int(line[15:17])
+        element = line[17:21]
+        if element not in VARS:
             continue
-        station, yr, mo, element, vals = parse_dly_line(line)
-        if station != STATION_ID or element not in ELEMENTS:
-            continue
-        for day, raw in vals.items():
+        for d in range(1, 32):
+            base = 21 + (d - 1) * 8
+            val = int(line[base:base + 5])
+            qflag = line[base + 6:base + 7]
+            if val == -9999:
+                try:
+                    rows.append((st, dt.date(year, month, d), element, None))
+                except ValueError:
+                    pass
+                continue
             try:
-                d = date(yr, mo, day)
+                date = dt.date(year, month, d)
             except ValueError:
                 continue
-            if d < START:
-                continue
-            v = convert_value(element, raw)
-            if v is None:
-                continue
-            series.setdefault(d, {})[element] = v
-            if last_date is None or d > last_date:
-                last_date = d
-    if last_date is None:
-        raise RuntimeError("No data found")
-    return series, last_date
+            if qflag.strip() != "":
+                rows.append((st, date, element, None))
+            else:
+                rows.append((st, date, element, val))
+    return pd.DataFrame(rows, columns=["station", "date", "element", "raw"])
 
-def ensure_full_range(series: Dict[date,Dict[str,float]], start: date, end: date) -> None:
-    d = start
-    while d <= end:
-        series.setdefault(d, {})
-        d += timedelta(days=1)
+def wide_and_convert(df_long: pd.DataFrame) -> pd.DataFrame:
+    wide = df_long.pivot_table(index=["station", "date"], columns="element", values="raw", aggfunc="first").reset_index()
+    wide = wide.sort_values("date").reset_index(drop=True)
 
-def interpolate_temps(series: Dict[date,Dict[str,float]], start: date, end: date) -> Dict[date,Set[str]]:
-    imputados: Dict[date,Set[str]] = {}
-    d = start + timedelta(days=1)
-    while d < end:
-        prev = series.get(d - timedelta(days=1), {})
-        nxt  = series.get(d + timedelta(days=1), {})
-        rec  = series.setdefault(d, {})
-        for el in ("TMIN","TMAX"):
-            if el not in rec and (el in prev) and (el in nxt):
-                rec[el] = (prev[el] + nxt[el]) / 2.0
-                imputados.setdefault(d, set()).add(el)
-        d += timedelta(days=1)
-    return imputados
+    def c10(x):
+        return x / 10.0 if pd.notna(x) else pd.NA
 
-def build_df(series: Dict[date,Dict[str,float]], imputados: Dict[date,Set[str]], start: date, end: date) -> pd.DataFrame:
-    rows = []
-    d = start
-    while d <= end:
-        rec = series.get(d, {})
-        tmin = rec.get("TMIN")
-        tmax = rec.get("TMAX")
-        tavg = rec.get("TAVG")
-        if tavg is None and (tmin is not None and tmax is not None):
-            tavg = (tmin + tmax) / 2.0
-        rows.append({
-            "Date": pd.Timestamp(d),
-            "Year": d.year,
-            "DOY_366": d.timetuple().tm_yday,
-            "Tmin_C": tmin,
-            "Tmax_C": tmax,
-            "Tavg_C": tavg,
-            "PRCP_mm": rec.get("PRCP"),
-            "SNOW_mm": rec.get("SNOW"),
-            "SNWD_mm": rec.get("SNWD"),
-            "ImputedTempFlag": 1 if d in imputados else 0
-        })
-        d += timedelta(days=1)
-    df = pd.DataFrame(rows)
-    is_leap = df["Date"].dt.is_leap_year
-    doy366 = df["DOY_366"]
-    df["DOY_365"] = doy366.astype(float)
-    df.loc[is_leap & (doy366 > 59), "DOY_365"] = doy366[is_leap & (doy366 > 59)] - 1
-    df.loc[(df["Date"].dt.month==2) & (df["Date"].dt.day==29), "DOY_365"] = np.nan
+    out = pd.DataFrame({
+        "date": wide["date"],
+        "Tmin_C": wide.get("TMIN").map(c10),
+        "Tmax_C": wide.get("TMAX").map(c10),
+        "PRCP_mm": wide.get("PRCP").map(c10),
+        "SNOW_mm": wide.get("SNOW").map(c10),
+        "SNWD_mm": wide.get("SNWD"),
+    })
+    out["Tavg_C"] = (out["Tmin_C"] + out["Tmax_C"]) / 2.0
+
+    out = out[out["date"] >= pd.Timestamp(START_DATE)].copy()
+    out["year"] = pd.to_datetime(out["date"]).dt.year
+    out["month"] = pd.to_datetime(out["date"]).dt.month
+    out["day"] = pd.to_datetime(out["date"]).dt.day
+    return out
+
+def impute_one_day_gaps(df: pd.DataFrame, cols):
+    df = df.sort_values("date").reset_index(drop=True)
+    for col in cols:
+        s = df[col].astype("Float64")
+        for i in range(1, len(df) - 1):
+            if pd.isna(s.iloc[i]) and pd.notna(s.iloc[i-1]) and pd.notna(s.iloc[i+1]):
+                d0 = pd.to_datetime(df.loc[i-1, "date"])
+                d1 = pd.to_datetime(df.loc[i, "date"])
+                d2 = pd.to_datetime(df.loc[i+1, "date"])
+                if (d1 - d0).days == 1 and (d2 - d1).days == 1:
+                    s.iloc[i] = (s.iloc[i-1] + s.iloc[i+1]) / 2.0
+        df[col] = s
+    df["Tavg_C"] = (df["Tmin_C"] + df["Tmax_C"]) / 2.0
     return df
 
-def write_outputs(df: pd.DataFrame) -> None:
-    daily = df[["Date","Year","DOY_366","DOY_365","Tmin_C","Tmax_C","Tavg_C","PRCP_mm","SNOW_mm","SNWD_mm","ImputedTempFlag"]].copy()
-    daily["Date"] = daily["Date"].dt.strftime("%Y-%m-%d")
-    daily.to_csv(OUT_DIR/"arlington_daily.csv", index=False)
+def to_doy365(d):
+    date = pd.to_datetime(d)
+    doy = int(date.dayofyear)
+    if date.month == 2 and date.day == 29:
+        return 59
+    if date.is_leap_year and (date.month > 2):
+        doy -= 1
+    return doy
 
-    base = df.dropna(subset=["DOY_365"]).copy()
-    cols = ["Tmin_C","Tmax_C","Tavg_C","PRCP_mm"]
-    def quant(p):
-        q = base.groupby("DOY_365")[cols].quantile(p, interpolation="linear").reset_index()
-        q.rename(columns={c: f"{c}_p{int(p*100)}" for c in cols}, inplace=True)
-        return q
-    p10 = quant(0.10)
-    p50 = quant(0.50)
-    p90 = quant(0.90)
-    pct = p10.merge(p50, on="DOY_365").merge(p90, on="DOY_365").sort_values("DOY_365")
+def build_percentiles(df: pd.DataFrame) -> pd.DataFrame:
+    metrics = ["Tmin_C", "Tmax_C", "Tavg_C", "PRCP_mm", "SNOW_mm", "SNWD_mm"]
+    tmp = df.copy()
+    tmp["DOY_365"] = pd.to_datetime(tmp["date"]).map(to_doy365)
 
-    # normalize column names to *_p10/_p50/_p90 for JS
-    pct.rename(columns={
-        "Tmin_C_p10":"Tmin_C_p10","Tmin_C_p50":"Tmin_C_p50","Tmin_C_p90":"Tmin_C_p90",
-        "Tmax_C_p10":"Tmax_C_p10","Tmax_C_p50":"Tmax_C_p50","Tmax_C_p90":"Tmax_C_p90",
-        "Tavg_C_p10":"Tavg_C_p10","Tavg_C_p50":"Tavg_C_p50","Tavg_C_p90":"Tavg_C_p90",
-        "PRCP_mm_p10":"PRCP_mm_p10","PRCP_mm_p50":"PRCP_mm_p50","PRCP_mm_p90":"PRCP_mm_p90",
-    }, inplace=True)
+    rows = []
+    for doy, g in tmp.groupby("DOY_365"):
+        row = {"DOY_365": int(doy)}
+        for m in metrics:
+            vals = g[m].dropna().astype(float)
+            if len(vals) == 0:
+                row[f"{m}_p10"] = pd.NA
+                row[f"{m}_p50"] = pd.NA
+                row[f"{m}_p90"] = pd.NA
+            else:
+                row[f"{m}_p10"] = float(vals.quantile(0.10))
+                row[f"{m}_p50"] = float(vals.quantile(0.50))
+                row[f"{m}_p90"] = float(vals.quantile(0.90))
+        rows.append(row)
 
-    pct.to_csv(OUT_DIR/"climatology_doy365_percentiles.csv", index=False)
+    return pd.DataFrame(rows).sort_values("DOY_365").reset_index(drop=True)
 
-    try:
-        daily.to_excel(OUT_DIR/"arlington_daily_latest.xlsx", index=False)
-    except Exception:
-        pass
+def write_outputs(df_daily: pd.DataFrame, df_pctl: pd.DataFrame):
+    DATA_DIR.mkdir(parents=True, exist_ok=True)
+    df_daily.to_csv(OUT_DAILY_CSV, index=False)
+    df_pctl.to_csv(OUT_CLIM_PCTL, index=False)
+    meta = {
+        "station_id": STATION_ID,
+        "start_date": str(START_DATE),
+        "last_date": str(pd.to_datetime(df_daily["date"]).max().date()),
+        "generated_utc": dt.datetime.utcnow().isoformat(timespec="seconds") + "Z",
+        "notes": "If NOAA is temporarily unavailable, workflow will no-op and keep previous datasets."
+    }
+    OUT_META.write_text(json.dumps(meta, indent=2), encoding="utf-8")
 
 def main():
+    print(f"[INFO] Station: {STATION_ID}")
+    print(f"[INFO] Fetching: {PRIMARY_URL}")
     text = fetch_dly_text()
-    series, last_date = build_series(text)
-    ensure_full_range(series, START, last_date)
-    imputados = interpolate_temps(series, START, last_date)
-    df = build_df(series, imputados, START, last_date)
-    write_outputs(df)
-    print("OK", START, "->", last_date, "rows", len(df))
+
+    if text is None:
+        if RAW_DLY_PATH.exists():
+            print(f"[WARN] NOAA unavailable. Using cached .dly: {RAW_DLY_PATH}")
+            text = RAW_DLY_PATH.read_text(encoding="utf-8", errors="ignore")
+        else:
+            print("[WARN] NOAA unavailable and no cached .dly found. No-op (exit 0).")
+            return 0
+
+    RAW_DLY_PATH.write_text(text, encoding="utf-8")
+
+    df_long = parse_dly_to_df(text)
+    df_daily = wide_and_convert(df_long)
+    df_daily = impute_one_day_gaps(df_daily, ["Tmin_C", "Tmax_C", "PRCP_mm", "SNOW_mm", "SNWD_mm"])
+
+    df_pctl = build_percentiles(df_daily)
+    write_outputs(df_daily, df_pctl)
+
+    print(f"[OK] Wrote: {OUT_DAILY_CSV}")
+    print(f"[OK] Wrote: {OUT_CLIM_PCTL}")
+    print(f"[OK] Wrote: {OUT_META}")
+    return 0
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main())
