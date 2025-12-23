@@ -34,7 +34,7 @@ RAW_DIR.mkdir(parents=True, exist_ok=True)
 
 RAW_DLY_PATH = RAW_DIR / f"{STATION_ID}.dly"
 
-OUT_DAILY_CSV = DATA_DIR / "daily.csv"
+OUT_DAILY_CSV = DATA_DIR / "arlington_daily.csv"
 OUT_CLIM_PCTL = DATA_DIR / "climatology_doy365_percentiles.csv"
 OUT_META = DATA_DIR / "meta.json"
 

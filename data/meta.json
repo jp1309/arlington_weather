@@ -1,0 +1,7 @@
+{
+  "station_id": "USW00013743",
+  "start_date": "1995-01-01",
+  "last_date": "2025-12-20",
+  "generated_utc": "2025-12-23T03:02:13Z",
+  "notes": "If NOAA is temporarily unavailable, workflow will no-op and keep previous datasets."
+}
