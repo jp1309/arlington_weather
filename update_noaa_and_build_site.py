@@ -139,9 +139,13 @@ def wide_and_convert(df_long: pd.DataFrame) -> pd.DataFrame:
     start_ts = pd.Timestamp(START_DATE)  # FIX
     out = out[out["date"] >= start_ts].copy()
 
-    out["year"] = out["date"].dt.year
+    out["Year"] = out["date"].dt.year
     out["month"] = out["date"].dt.month
     out["day"] = out["date"].dt.day
+    
+    # Add DOY_365 column
+    out["DOY_365"] = out["date"].map(to_doy365)
+    
     return out
 
 
