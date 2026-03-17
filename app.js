@@ -206,6 +206,8 @@ function buildPlot() {
       }
     }
 
+    const maxYear = years.length > 0 ? Math.max(...years) : null;
+
     for (const yr of years) {
       const rows = DATA.filter(r => Number(r["Year"]) === yr).filter(r => {
         const d = toNum(r["DOY_365"]);
@@ -213,11 +215,12 @@ function buildPlot() {
       });
       const x = rows.map(r => toNum(r["DOY_365"]));
       const y = rows.map(r => toNum(r[metric]));
+      const isMax = yr === maxYear;
       traces.push({
         x, y,
         name: String(yr),
         mode: "lines",
-        line: { width: (yr === 2025 ? 4 : 2) },
+        line: { width: isMax ? 4 : 2, color: isMax ? "rgba(239,68,68,1)" : undefined },
         customdata: x.map(doyToLabel),
         hovertemplate: "Año " + yr + "<br>%{customdata}<br>" + meta.title + ": %{y} " + meta.unit + "<extra></extra>"
       });
